@@ -1,5 +1,6 @@
 // ---------------------------------------------------------
 // Automated Ball Tracking + Manual Overdrive + Watchdog
+// Updated to receive Kp and isTracking signal
 // ---------------------------------------------------------
 
 const int stepPin = 9;         
@@ -11,17 +12,17 @@ const int buttonPin2 = 7;
 float angleX = 0, angleY = 0;
 int normX = 0, normY = 0;
 
-// PID & Speed
-float Kp = 1.0;               
+// PID & Control
+float Kp = 1.0;               // Now updated from Python
+bool isTracking = false;      // Now updated from Python
 float omega = 0.0;            
 float omega_preset = 0.0;     
 const float max_omega = 40.0; 
 const float manual_speed = 5.0;
 
 // --- WATCHDOG SETTINGS ---
-uint32_t last_packet_time = 0;   // Time of last valid packet from Python
-const uint32_t timeout_ms = 200; // Stop if no data for 200ms
-// --------------------------
+uint32_t last_packet_time = 0;   
+const uint32_t timeout_ms = 200; 
 
 String inputBuffer = ""; 
 
@@ -49,13 +50,13 @@ void loop() {
     if (inChar == '\n') {
       parseIncomingData(inputBuffer);
       inputBuffer = ""; 
-      last_packet_time = millis(); // UPDATE WATCHDOG on valid packet
+      last_packet_time = millis(); 
     } else {
       inputBuffer += inChar;
     }
   }
 
-  // 2. CHECK WATCHDOG (If Python app is closed/frozen)
+  // 2. CHECK WATCHDOG
   bool python_active = (millis() - last_packet_time < timeout_ms);
 
   // 3. INPUT PRIORITY LOGIC
@@ -68,16 +69,16 @@ void loop() {
   else if (btnRight) {
     omega_preset = manual_speed;
   } 
-  else if (python_active) {
-    // AUTOMATIC MODE (Only if Python is sending data)
+  else if (python_active && isTracking) {
+    // AUTOMATIC MODE (Only if Python is active AND "isTracking" is true)
     omega_preset = angleX * Kp;
     if (omega_preset > max_omega) omega_preset = max_omega;
     if (omega_preset < -max_omega) omega_preset = -max_omega;
   } 
   else {
-    // CAMERA PROGRAM STOPPED OR BALL LOST
+    // STOP: If manual is off and (Python inactive OR isTracking is false)
     omega_preset = 0;
-    angleX = 0; // Reset last known error
+    angleX = 0; 
   }
 
   // 4. ACCELERATION BLOCK
@@ -111,14 +112,24 @@ void loop() {
 void parseIncomingData(String line) {
   line.trim();
   if (line.length() == 0) return;
+
+  // New parsing logic for 6 values (5 commas)
   int idx1 = line.indexOf(',');
   int idx2 = line.indexOf(',', idx1 + 1);
   int idx3 = line.indexOf(',', idx2 + 1);
+  int idx4 = line.indexOf(',', idx3 + 1);
+  int idx5 = line.indexOf(',', idx4 + 1);
 
-  if (idx1 > 0 && idx2 > 0 && idx3 > 0) {
-    angleX = line.substring(0, idx1).toFloat();
-    angleY = line.substring(idx1 + 1, idx2).toFloat();
-    normX  = line.substring(idx2 + 1, idx3).toInt();
-    normY  = line.substring(idx3 + 1).toInt();
+  if (idx1 > 0 && idx2 > 0 && idx3 > 0 && idx4 > 0 && idx5 > 0) {
+    angleX     = line.substring(0, idx1).toFloat();
+    angleY     = line.substring(idx1 + 1, idx2).toFloat();
+    normX      = line.substring(idx2 + 1, idx3).toInt();
+    normY      = line.substring(idx3 + 1, idx4).toInt();
+    Kp         = line.substring(idx4 + 1, idx5).toFloat();
+    isTracking = (line.substring(idx5 + 1).toInt() == 1);
+
+    // Optional debug feedback
+    Serial.print("Kp:"); Serial.print(Kp);
+    Serial.print(" Track:"); Serial.println(isTracking);
   }
 }
